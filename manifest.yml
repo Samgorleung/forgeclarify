@@ -1,0 +1,33 @@
+modules:
+  confluence:contextMenu:
+    - key: forgeclarify-audit-action
+      title: "ForgeClarify: Audit Spec"
+      resource: main
+      resolver:
+        function: resolver-fn
+
+  function:
+    - key: resolver-fn
+      handler: index.handler
+
+resources:
+  - key: main
+    path: static/hello-world/build
+
+permissions:
+  scopes:
+    - read:confluence-content.summary
+    - read:confluence-space.summary
+    - write:jira-work
+    - read:jira-work
+  external:
+    fetch:
+      backend:
+        - https://generativelanguage.googleapis.com
+
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
+  id: ari:cloud:ecosystem::app/a8d4dcb4-0205-4caf-a824-26f29cae745e
