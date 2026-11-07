@@ -1,46 +1,32 @@
-# Forge Hello World
+# ForgeClarify
 
-This project contains a Forge app written in Javascript that displays `Hello World!` in a Confluence context menu.
+AI Systems Architecture & Requirement Spec Auditor for Confluence & Jira, powered by Gemini 3.8 Flash on Atlassian Forge.
 
-See [developer.atlassian.com/platform/forge/](https://developer.atlassian.com/platform/forge) for documentation and tutorials explaining Forge.
+## Overview
 
-## Requirements
+ForgeClarify helps product and engineering teams bridge the gap between PRDs and sprint execution. Highlight any section of a requirement draft on a Confluence page to instantly run an architectural audit, evaluate readiness scores, uncover missing edge cases, and push structured Gherkin user stories directly to Jira backlogs.
 
-See [Set up Forge](https://developer.atlassian.com/platform/forge/set-up-forge/) for instructions to get set up.
+## Architecture & Tech Stack
 
-## Quick start
-- Install top-level dependencies:
-```
+* **Frontend:** Atlassian Forge Custom UI (React 18 / `@forge/bridge`)
+* **Backend:** Atlassian Forge Serverless Resolver (`@forge/resolver`, `@forge/api`)
+* **AI Engine:** Google Gemini 3.8 Flash via Google AI Studio API (`responseMimeType: "application/json"`)
+* **Integrations:** Confluence Context Menu Module (`confluence:contextMenu`) and Jira Cloud REST API (ADF formatted issue generation)
+
+## Prerequisites
+
+* Node.js v18 or v20
+* Atlassian Forge CLI (`npm install -g @forge/cli`)
+* Google AI Studio API Key
+
+## Getting Started for Collaborators
+
+### 1. Clone & Install Dependencies
+
+```bash
+git clone [https://github.com/Samgorleung/forgeclarify.git](https://github.com/Samgorleung/forgeclarify.git)
+cd forgeclarify
 npm install
-```
-
-- Install dependencies inside of the `static/hello-world` directory:
-```
+cd static/hello-world
 npm install
-```
-
-- Modify your app by editing the files in `static/hello-world/src/`.
-
-- Build your app (inside of the `static/hello-world` directory):
-```
-npm run build
-```
-
-- Deploy your app by running:
-```
-forge deploy
-```
-
-- Install your app in an Atlassian site by running:
-```
-forge install
-```
-
-### Notes
-- Use the `forge deploy` command when you want to persist code changes.
-- Use the `forge install` command when you want to install the app on a new site.
-- Once the app is installed on a site, the site picks up the new app changes you deploy without needing to rerun the install command.
-
-## Support
-
-See [Get help](https://developer.atlassian.com/platform/forge/get-help/) for how to get help and provide feedback.
+cd ../..

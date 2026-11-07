@@ -3,26 +3,99 @@ import api, { route } from '@forge/api';
 
 const resolver = new Resolver();
 
-// 1. Audit requirements text using Gemini 2.5 Flash
-resolver.define('auditRequirement', async (req) => {
-  const { text } = req.payload;
+async function callGeminiWithFallback(systemInstruction, userText) {
   const apiKey = process.env.GEMINI_API_KEY;
-
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY environment variable is not configured.');
   }
 
-  const systemInstruction = `
-You are ForgeClarify, an elite Agile & Systems Architecture Auditor.
-Audit the provided requirement text. Identify:
-1. Ambiguities & edge cases.
-2. Architecture risks and non-functional requirements (security, auth, latency, rate limits).
-3. Generate structured Jira Backlog items (User Stories with Gherkin Acceptance Criteria, Architecture Spike tickets, Security tasks).
+  const candidateModels = [
+    'gemini-3.8-flash',
+    'gemini-3.6-flash'
+  ];
 
-Return strictly JSON matching this structure:
+  let lastError = null;
+
+  for (const model of candidateModels) {
+    const controller = new AbortController();
+    // 11s per model so both primary + fallback fit inside Forge's 25s limit
+    const timeoutId = setTimeout(() => controller.abort(), 11000);
+
+    try {
+      console.log(`Calling Gemini with model: ${model} (thinkingLevel: low)...`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `Requirement text to audit:\n${userText}` }]
+            }
+          ],
+          systemInstruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          generationConfig: {
+            responseMimeType: 'application/json',
+            thinkingConfig: {
+              thinkingLevel: 'low'
+            }
+          }
+        })
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const result = await response.json();
+        const parts = result.candidates?.[0]?.content?.parts || [];
+        const textPart = parts.find((p) => !p.thought && p.text) || parts[parts.length - 1];
+        const rawJson = textPart?.text;
+
+        if (!rawJson) {
+          throw new Error('Empty JSON response from Gemini.');
+        }
+        return JSON.parse(rawJson);
+      }
+
+      const errText = await response.text();
+      console.warn(`Model ${model} returned HTTP ${response.status}: ${errText}`);
+      lastError = new Error(`Gemini API error (${response.status})`);
+
+      if ([429, 503, 504].includes(response.status)) {
+        continue;
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      console.warn(`Call failed for ${model}: ${err.message}`);
+      lastError = err;
+    }
+  }
+
+  throw new Error(`Audit failed: ${lastError?.message || 'Service busy'}. Please click Run Audit again.`);
+}
+
+// 1. Audit requirements text (matches static/hello-world/src/App.js schema)
+async function handleAudit(req) {
+  const { text } = req.payload || {};
+  if (!text || !text.trim()) {
+    throw new Error('Please provide or highlight requirement text first.');
+  }
+
+  const systemInstruction = `You are ForgeClarify, an elite Agile & Systems Architecture Auditor.
+Audit the provided requirement text concisely. Identify:
+1. Ambiguities & edge cases (2 to 4 concise bullet strings).
+2. Architecture risks and non-functional requirements (2 to 4 concise bullet strings).
+3. Generate 2 to 3 structured Jira Backlog items (User Stories with Given/When/Then Acceptance Criteria, or Technical Spike tasks).
+
+Return strictly JSON matching this exact structure:
 {
-  "summary": "Brief executive summary of findings",
-  "readinessScore": 72,
+  "summary": "Brief 1-2 sentence executive summary of findings",
+  "readinessScore": 45,
   "ambiguities": ["Item 1", "Item 2"],
   "architectureRisks": ["Risk 1", "Risk 2"],
   "suggestedTickets": [
@@ -32,60 +105,35 @@ Return strictly JSON matching this structure:
       "description": "User story details with Given/When/Then acceptance criteria"
     },
     {
-      "summary": "Investigate Payment Gateway webhook reliability & replay attacks",
+      "summary": "Technical spike title",
       "issueType": "Task",
-      "description": "Technical spike to establish idempotency keys and error retry mechanisms."
+      "description": "Technical spike details"
     }
   ]
+}`;
+
+  return await callGeminiWithFallback(systemInstruction, text);
 }
-`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
-
-  const response = await api.fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `Requirement text to audit:\n${text}` }]
-        }
-      ],
-      systemInstruction: {
-        parts: [{ text: systemInstruction }]
-      },
-      generationConfig: {
-        responseMimeType: 'application/json'
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${errText}`);
-  }
-
-  const result = await response.json();
-  const rawJson = result.candidates?.[0]?.content?.parts?.[0]?.text;
-  return JSON.parse(rawJson);
-});
+resolver.define('auditRequirement', handleAudit);
+resolver.define('auditRequirements', handleAudit);
+resolver.define('auditSpec', handleAudit);
 
 // 2. Export validated items directly into Jira project (SCRUM)
 resolver.define('createJiraIssue', async (req) => {
-  const { projectKey = 'SCRUM', summary, description, issueType = 'Story' } = req.payload;
+  const { projectKey = 'SCRUM', summary, description, issueType = 'Story' } = req.payload || {};
 
   const payload = {
     fields: {
       project: { key: projectKey },
-      summary: summary,
+      summary: summary || 'ForgeClarify Backlog Item',
       description: {
         type: 'doc',
         version: 1,
         content: [
           {
             type: 'paragraph',
-            content: [{ type: 'text', text: description }]
+            content: [{ type: 'text', text: description || 'Generated by ForgeClarify' }]
           }
         ]
       },
@@ -103,8 +151,8 @@ resolver.define('createJiraIssue', async (req) => {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(`Failed to create Jira ticket: ${JSON.stringify(errorData)}`);
+    const errorData = await response.text();
+    throw new Error(`Failed to create Jira ticket: ${errorData}`);
   }
 
   const data = await response.json();
